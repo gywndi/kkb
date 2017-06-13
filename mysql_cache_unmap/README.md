@@ -14,7 +14,9 @@ $ gcc -o unmap_cache unmap_cache.c
 
 `
 $ vi mysql_cache_unmap
+
   gen_log_names /log/binary-log
+  
   gen_log_names /log/relay-log
 `
 
