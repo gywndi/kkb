@@ -1,4 +1,4 @@
-# mysql_cache_unmap
+# unmap_cache
 
 unmap_cache.c - unmap page cache
  
