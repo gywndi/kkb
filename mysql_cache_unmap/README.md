@@ -9,11 +9,5 @@ How to use:
 </code></pre>
 
 2. Change or Add binary/relay log directory
-<pre><code>$ vi mysql_cache_unmap
-  gen_log_names /log/binary-log
-  gen_log_names /log/relay-log
-</code></pre>
-
-3. Execute mysql_cache_unmap
-<pre><code>$ mysql_cache_unmap > mysql_cache_unmap.log 2>&1
+<pre><code>$ unmap_cache /log/mysql-log/mysql-binary.000001
 </code></pre>
