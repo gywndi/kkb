@@ -1,7 +1,6 @@
 # mysql_cache_unmap
 
-mysql_cache_unmap - bash
-lib/unmap_cache.c - unmap page cache
+unmap_cache.c - unmap page cache
  
 How to use:
 1. Compile "unmap_cache.c" 
