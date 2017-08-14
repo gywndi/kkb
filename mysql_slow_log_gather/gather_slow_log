@@ -1,0 +1,328 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use URI::Escape;
+use File::Basename;
+use Getopt::Long;
+use Pod::Usage;
+
+my $dirname = dirname(__FILE__);
+
+my $curpos = 0;
+my $slow_log = "";
+my $last_read_pos_file="$dirname/gather_slow_log.info";
+
+my $slow_log_inode;
+my $slow_log_size;
+
+my $pattern1 = "^# Time: (.*)T(.*)\\.(.*)\$";
+my $pattern2 = "^# User\@Host: (.*)\\[.*\\] @  \\[(.*)\\]  Id: (.*)\$";
+my $pattern3 = "^# Schema: (.*)  Last_errno: (.*)  Killed: (.*)\$";
+my $pattern4 = "^# Query_time: (.*)  Lock_time: (.*)  Rows_sent: (.*)  Rows_examined: (.*)  Rows_affected: (.*)\$";
+my $pattern5 = "^# Bytes_sent: (.*)  Tmp_tables: (.*)  Tmp_disk_tables: (.*)  Tmp_table_sizes: (.*)\$";
+my $pattern6 = "^# QC_Hit: (.*)  Full_scan: (.*)  Full_join: (.*)  Tmp_table: (.*)  Tmp_table_on_disk: (.*)\$";
+my $pattern7 = "^# Filesort: (.*)  Filesort_on_disk: (.*)  Merge_passes: (.*)\$";
+my $pattern8 = "^SET timestamp=(.*);\$";
+my $pattern9 = "^USE (.*);\$";
+
+my $date = "";
+my $time = "";
+my $micros = "";
+my $user = "";
+my $host = "";
+my $id = "";
+my $schema = "";
+my $last_error_no = "";
+my $killed = "";
+my $query_time = "";
+my $lock_time = "";
+my $row_sent = "";
+my $row_examined = "";
+my $row_affected = "";
+my $bytes_sent = "";
+my $tmp_tables = "";
+my $tmp_disk_tables = "";
+my $tmp_table_size = "";
+my $qc_hit = "";
+my $full_scan = "";
+my $full_join = "";
+my $tmp_table = "";
+my $tmp_table_on_disk = "";
+my $filesort = "";
+my $filesort_on_disk = "";
+my $merge_passes = "";
+my $timestamp = "";
+my $database = "";
+my $query = "";
+my $query_loop = 0;
+my $ret_msg="";
+my $host_name=`hostname -s`;
+my $slow_log_count = 0;
+my $max_gap_size = 5*1024*1024;
+
+exit &main();
+
+
+
+## ----------------------------
+## Call API to store slow log
+## ----------------------------
+sub flush_log(){
+  if($query_time gt 0.5){
+    ######################
+    ## Make yours
+    ######################
+    # [host_name] $host_name
+    # [date] $date
+    # [time] $time
+    # [micros] $micros
+    # [user] $user
+    # [host] $host
+    # [id] $id
+    # [schema] $schema
+    # [last_error_no] $last_error_no
+    # [killed] $killed
+    # [query_time] $query_time
+    # [lock_time] $lock_time
+    # [row_sent] $row_sent
+    # [row_examined] $row_examined
+    # [row_affected] $row_affected
+    # [bytes_sent] $bytes_sent
+    # [tmp_tables] $tmp_tables
+    # [tmp_disk_tables] $tmp_disk_tables
+    # [tmp_table_size] $tmp_table_size
+    # [qc_hit] $qc_hit
+    # [full_scan] $full_scan
+    # [full_join] $full_join
+    # [tmp_table] $tmp_table
+    # [tmp_table_on_disk] $tmp_table_on_disk
+    # [filesort] $filesort
+    # [filesort_on_disk] $filesort_on_disk
+    # [merge_passes] $merge_passes
+    # [timestamp] $timestamp
+    # [database] $database
+    # [sql] $query
+    $slow_log_count++;
+  }
+  $query_loop = 0;
+  $query = "";
+}
+
+
+
+## ----------------------------
+## send alarm to admin
+## ----------------------------
+sub send_alarm($){
+  my $msg = shift;
+    ######################
+    ## Make your alarm
+    ######################
+    # [host_name] $host_name
+    # [msg] $msg
+}
+
+
+
+## ----------------------------
+## Define File Position to read
+## ----------------------------
+sub read_curpos(){
+
+  # Get current slow log info - real log
+  $slow_log_inode = (stat $slow_log)[1];
+  $slow_log_size = (stat $slow_log)[7];
+
+  # no info file, set curpos last line
+  if(! -e $last_read_pos_file){
+    print ">> No $dirname/gather_slow_log.info, start from last position\n";
+    $curpos = $slow_log_size;
+    return 1;
+  }
+
+  my @pos_info;
+  open(fh_last_read_pos, "<", $last_read_pos_file) or die "can't open < $last_read_pos_file: $!";
+  foreach (<fh_last_read_pos>){
+    @pos_info = split /,/, $_;
+    my $last_inode = $pos_info[0];
+    my $last_curpos = $pos_info[1];
+
+    # Same inode number
+    $curpos = ($last_inode == $slow_log_inode && $last_curpos <= $slow_log_size) ? $last_curpos : 0;
+
+    ## Check added log size
+    my $gap_size = $slow_log_size - $curpos;
+    if($gap_size > $max_gap_size){
+      print "Exceed max gap size: $max_gap_size, current: $gap_size\n";
+      $curpos = $slow_log_size;
+
+      # Send alarm, this is not common issue.. too many slow queries
+      send_alarm("Exceed max gap size: ".sprintf("%.2f",$gap_size/1024/1024)."MB");
+    }
+
+  }
+  close (fh_last_read_pos) or die $1;
+  print ">> Read from $curpos \n";
+  return 1;
+}
+
+
+
+## ----------------------------
+## Parse slow log
+## ----------------------------
+sub parse_slow_log(){
+  open(fh_slow_log, "<", $slow_log) or die "can't open < $slow_log: $!";
+  seek(fh_slow_log, $curpos, 0);
+
+  for ($curpos = tell(fh_slow_log); $_ = readline(fh_slow_log); $curpos = tell(fh_slow_log)) {
+
+    ## This is information line
+    if(/^# /){
+
+      if ($query_loop gt 0){
+        flush_log();
+      }
+
+      if(/$pattern1/){
+        ($date, $time, $micros) = $_ =~ /$pattern1/g;
+        next;
+      }
+
+      if(/$pattern2/){
+        ($user, $host, $id) = $_ =~ /$pattern2/g;
+        next;
+      }
+
+      if(/$pattern3/){
+        ($schema, $last_error_no, $killed) = $_ =~ /$pattern3/g;
+        next;
+      }
+
+      if(/$pattern4/){
+        ($query_time, $lock_time, $row_sent, $row_examined, $row_affected) = $_ =~ /$pattern4/g;
+        next;
+      }
+
+      if(/$pattern5/){
+        ($bytes_sent, $tmp_tables, $tmp_disk_tables, $tmp_table_size) = $_ =~ /$pattern5/g;
+        next;
+      }
+
+      if(/$pattern6/){
+        ($qc_hit, $full_scan, $full_join, $tmp_table, $tmp_table_on_disk) = $_ =~ /$pattern6/g;
+        next;
+      }
+
+      if(/$pattern7/){
+        ($filesort, $filesort_on_disk, $merge_passes) = $_ =~ /$pattern7/g;
+        next;
+      }
+      next;
+    }
+
+    if(/$pattern8/){
+      ($timestamp) = $_ =~ /$pattern8/g;
+      next;
+    }
+
+    if(/$pattern9/i){
+      ($database) = $_ =~ /$pattern9/ig;
+      next;
+    }
+
+    $query .= $_;
+    $query_loop++;
+  }
+  close (fh_slow_log) or die $1;
+
+  ## Flush
+  flush_log();
+
+}
+
+
+
+## ----------------------------
+## Write file position and inode
+## ----------------------------
+sub save_curpos(){
+  open(fh_last_read_pos, ">", $last_read_pos_file) or die "can't open < $last_read_pos_file: $!";
+  print fh_last_read_pos "$slow_log_inode,$curpos";
+  close (fh_last_read_pos) or die $1;
+}
+
+
+
+## ----------------------------
+## Usage
+## ----------------------------
+sub usage ($) {
+    my $msg = shift;
+    print $msg;
+    pod2usage(0);
+}
+
+
+
+## ----------------------------
+## main
+## ----------------------------
+sub main {
+  GetOptions(
+    'slow-log=s' => \$slow_log
+  ) or usage(@_);
+
+  if($slow_log eq ""){
+    usage("Not enough arguments.\n\n");
+    return 1;
+  }
+
+  print "=========================\n";
+  print ">> ".localtime()."\n";
+  print "=========================\n";
+
+  if(! -e $slow_log){
+    print ">> not exists : $slow_log, exit \n\n";
+    return 1;
+  }
+
+  ## Read current postion
+  read_curpos();
+
+  ## Parse Slow log until EOF
+  parse_slow_log();
+
+  ## Save current postion
+  save_curpos();
+
+  print ">> $slow_log_count gathered, end\n\n";
+  return 0;
+}
+
+__END__
+
+=pod
+
+=head1 NAME
+
+gather_slow_log
+
+=head1 SYNOPSIS
+
+gather_slow_log [--help]
+
+ --slow_log=slow_log_path
+
+=head1 OPTIONS
+
+=over
+
+=item help
+
+Displays the usage message.
+
+=item slow_log
+
+slow log file path ex) --slow_log=/data/mysql/mysql-slow.log
