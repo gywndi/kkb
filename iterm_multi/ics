@@ -22,9 +22,8 @@ done
 ## applescript start 
 ########################
 osascript << EOT
-set targets to { ${target_list} }
 
--- set lines and cols
+set targets to { ${target_list} }
 set num_targets to count of targets
 if num_targets <= 3 then
   set num_lines to 1
@@ -61,6 +60,6 @@ tell application "iTerm"
       write text "ssh " & (item i of targets)
     end tell
   end repeat
-  -- tell application "System Events" to key code 36 using command down
 end tell
+
 EOT
