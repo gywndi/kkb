@@ -1,0 +1,66 @@
+#!/bin/bash
+
+SCRIPT_NAME=$(basename $0)
+SCRIPT_BASEDIR="$( cd "$( dirname "$0" )" && pwd )"
+
+########################
+# Generate account info
+########################
+for target in $@
+do
+  ## add comma
+  if [ "$target_list" != "" ]; then
+    target_list="${target_list},"
+  fi
+
+  ## target list
+  target_list="${target_list}\"${target}\""
+done
+
+
+########################
+## applescript start 
+########################
+osascript << EOT
+set targets to { ${target_list} }
+
+-- set lines and cols
+set num_targets to count of targets
+if num_targets <= 3 then
+  set num_lines to 1
+else
+  set num_lines to round (num_targets ^ 0.5)
+end if
+set num_cols to round (num_targets / num_lines) rounding up
+
+tell application "iTerm"
+  create window with default profile
+  activate
+
+  repeat with i from 1 to num_lines
+    tell session 1 of current tab of current window
+      if i < num_lines then
+        split horizontally with default profile
+      end if
+    end tell
+  end repeat
+
+  repeat with i from 1 to num_lines
+    set sessionid to ((i - 1) * num_cols) + 1
+    repeat with j from 1 to (num_cols - 1)
+      if (sessionid + j) <= num_targets then
+        tell session sessionid of current tab of current window
+          split vertically with default profile
+        end tell
+      end if
+    end repeat
+  end repeat
+
+  repeat with i from 1 to num_targets
+    tell session i of current tab of current window
+      write text "ssh " & (item i of targets)
+    end tell
+  end repeat
+  -- tell application "System Events" to key code 36 using command down
+end tell
+EOT
